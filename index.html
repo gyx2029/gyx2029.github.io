@@ -73,10 +73,6 @@
       <div id="result" class="muted">— 等待提交 —</div>
     </div>
 
-    <div class="card">
-      <div class="status">提示</div>
-      <div style="height:8px" class="muted">示例第一步（最优策略之一）：把 1,2,3,4 放左；5,6,7,8 放右并称重。</div>
-    </div>
   </aside>
 
   <footer>打开此文件（双击或在浏览器中打开）即可运行。需要改进界面或加提示演示，我可以继续优化。</footer>
@@ -231,10 +227,6 @@ function draw(){
       ctx.beginPath(); ctx.arc(bx,by,8,0,Math.PI*2); ctx.fillStyle = `hsl(${210+(i*25)%120}deg 70% 60%)`; ctx.fill(); ctx.stroke(); rcount++;
     }
   }
-
-  // controls preview
-  ctx.fillStyle='#fff'; ctx.fillRect(W-360, 360, 320, 120); ctx.strokeStyle='#e2e8f0'; ctx.strokeRect(W-360,360,320,120);
-  ctx.fillStyle='#222'; ctx.font='600 14px system-ui'; ctx.fillText('Controls: 称重 / 清空 / 新局', W-200, 380);
 
   // if game over, highlight odd ball and show message
   if(gameOver){
