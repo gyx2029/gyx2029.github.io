@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>12球谜题 — 三次称重 (纯 HTML5 + JavaScript)</title>
+<style>
+  :root{--bg:#f6f8fb; --panel:#ffffff; --accent:#6aa84f; --muted:#6b7280}
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans CJK SC',"Microsoft Yahei",Arial}
+  body{background:linear-gradient(180deg,#eaf2ff, #f6f8fb);display:flex;align-items:center;justify-content:center}
+  .app{width:1100px;max-width:98%;height:720px;background:var(--panel);border-radius:14px;box-shadow:0 10px 30px rgba(30,40,60,0.12);padding:18px;display:grid;grid-template-columns:1fr 380px;gap:18px}
+  header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding-bottom:6px}
+  h1{font-size:20px;margin:0}
+  .play-area{background:linear-gradient(180deg,#fff,#fbfdff);border-radius:10px;padding:12px;border:1px solid rgba(20,30,60,0.03);position:relative}
+  canvas{width:100%;height:100%;display:block;border-radius:8px}
+  .sidebar{display:flex;flex-direction:column;gap:12px}
+  .card{background:linear-gradient(180deg,#fff,#fcfcff);padding:12px;border-radius:10px;border:1px solid rgba(20,30,60,0.04)}
+  button{cursor:pointer;border:0;padding:8px 12px;border-radius:8px;background:var(--accent);color:#fff;font-weight:600}
+  .muted{color:var(--muted);font-size:13px}
+  .controls{display:flex;gap:8px;align-items:center}
+  .small-btn{padding:6px 10px;background:#ddd;color:#222;border-radius:8px}
+  .balls-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+  .ball-pill{display:flex;align-items:center;justify-content:center;height:36px;border-radius:8px;background:#f3f6fb;border:1px solid #e6eefc;font-weight:600}
+  .status{font-size:14px}
+  .guess-row{display:flex;gap:8px;align-items:center}
+  .ghost{opacity:0.6}
+  footer{grid-column:1/-1;text-align:center;color:#9aa0aa;font-size:12px;padding-top:6px}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>12球谜题 — 用三次称重找不同的球</h1>
+    <div class="muted">点击球循环放置：未放 / 左盘 / 右盘</div>
+  </header>
+
+  <section class="play-area" id="playArea">
+    <canvas id="c"></canvas>
+
+    <!-- 提示已按要求取消 -->
+  </section>
+
+  <aside class="sidebar">
+    <div class="card">
+      <div class="status">操作</div>
+      <div style="height:10px"></div>
+      <div class="controls">
+        <button id="weighBtn">称重 (Weigh)</button>
+        <button id="clearBtn" class="small-btn">清空盘子</button>
+        <button id="shuffleBtn" class="small-btn">随机新局</button>
+      </div>
+      <div style="height:10px"></div>
+      <div class="muted">说明：点击画面上的球可在 三态(未放/左盘/右盘) 切换。最多称重 3 次，称满后在下方选择不同球并提交。</div>
+    </div>
+
+    <div class="card">
+      <div class="status">称重记录</div>
+      <div style="height:8px"></div>
+      <div id="history" class="muted">— 尚无记录 —</div>
+    </div>
+
+    <div class="card">
+      <div class="status">提交猜测（称重 3 次后可用）</div>
+      <div style="height:8px"></div>
+      <div class="balls-grid" id="guessGrid"></div>
+      <div style="height:8px"></div>
+      <div class="guess-row">
+        <button id="heavier" class="small-btn">判断：更重</button>
+        <button id="lighter" class="small-btn">判断：更轻</button>
+        <button id="submitGuess" class="small-btn">提交答案</button>
+      </div>
+      <div style="height:8px"></div>
+      <div id="result" class="muted">— 等待提交 —</div>
+    </div>
+
+    <div class="card">
+      <div class="status">提示</div>
+      <div style="height:8px" class="muted">示例第一步（最优策略之一）：把 1,2,3,4 放左；5,6,7,8 放右并称重。</div>
+    </div>
+  </aside>
+
+  <footer>打开此文件（双击或在浏览器中打开）即可运行。需要改进界面或加提示演示，我可以继续优化。</footer>
+</div>
+
+<script>
+// 12 balls puzzle — pure JS, canvas-based rendering
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W=800, H=620; // internal canvas size
+canvas.width = W; canvas.height = H;
+canvas.style.width = '100%'; canvas.style.height = '100%';
+
+const N = 12;
+const balls = [];
+let oddIndex = -1; // 0..11
+let oddDir = null; // 'heavier' | 'lighter'
+let weighCount = 0;
+const maxWeigh = 3;
+let lastBalance = null; // 'left','right','equal'
+let history = [];
+let selectedGuess = null;
+let guessDir = null;
+let gameOver = false;
+
+function randInit(){
+  balls.length = 0;
+  for(let i=0;i<N;i++){
+    balls.push({id:i, place:'off'}); // place: off/left/right
+  }
+  oddIndex = Math.floor(Math.random()*N);
+  oddDir = (Math.random()<0.5)?'heavier':'lighter';
+  weighCount=0; lastBalance=null; history=[]; selectedGuess=null; guessDir=null; gameOver=false;
+  updateUI(); draw();
+}
+
+function ballWeight(i){
+  if(i===oddIndex) return oddDir==='heavier'?1.15:0.85;
+  return 1.0;
+}
+
+function doWeigh(){
+  if(weighCount>=maxWeigh || gameOver) return;
+  let left=0, right=0;
+  for(let b of balls){
+    if(b.place==='left') left += ballWeight(b.id);
+    if(b.place==='right') right += ballWeight(b.id);
+  }
+  if(Math.abs(left-right)<1e-6) lastBalance='equal';
+  else if(left>right) lastBalance='left';
+  else lastBalance='right';
+  weighCount++;
+  history.push({left:balls.filter(b=>b.place==='left').map(b=>b.id+1), right:balls.filter(b=>b.place==='right').map(b=>b.id+1), result:lastBalance});
+  updateUI(); draw();
+}
+
+function clearPans(){ for(let b of balls) b.place='off'; draw(); }
+
+function cyclePlace(i){ if(weighCount>=maxWeigh || gameOver) return; let p=balls[i].place; if(p==='off') balls[i].place='left'; else if(p==='left') balls[i].place='right'; else balls[i].place='off'; draw(); }
+
+function updateUI(){
+  // 提示元素已移除，相关更新已取消
+  const hist = document.getElementById('history');
+  if(history.length===0) hist.textContent='— 尚无记录 —';
+  else hist.innerHTML = history.map((h,i)=>`#${i+1}: 左 [${h.left.join(',')}] vs 右 [${h.right.join(',')}] → ${h.result}`).join('<br>');
+
+  // guess grid
+  const guessGrid = document.getElementById('guessGrid'); guessGrid.innerHTML='';
+  for(let i=0;i<N;i++){
+    const btn = document.createElement('div'); btn.className='ball-pill'; btn.textContent = (i+1);
+    if(selectedGuess===i) btn.style.background = '#dfeee0';
+    btn.onclick = ()=>{ if(weighCount<maxWeigh || gameOver) return; selectedGuess = i; updateUI(); };
+    guessGrid.appendChild(btn);
+  }
+  // buttons
+  document.getElementById('heavier').style.background = (guessDir==='heavier')? '#f4d35e' :'#ddd';
+  document.getElementById('lighter').style.background = (guessDir==='lighter')? '#f4d35e' :'#ddd';
+  document.getElementById('submitGuess').style.background = (weighCount>=maxWeigh && selectedGuess!=null && guessDir!=null && !gameOver) ? '#6aa84f' : '#bbb';
+
+  const res = document.getElementById('result');
+  if(gameOver){
+    if(selectedGuess===oddIndex && guessDir===oddDir) res.innerHTML = `<strong style='color:#196f3d'>恭喜，正确！</strong> 不同球是 #${oddIndex+1}，它比其他球 ${oddDir==='heavier'?'更重':'更轻'}。`;
+    else res.innerHTML = `<strong style='color:#a40c28'>回答错误。</strong> 真正不同的是 #${oddIndex+1}，它 ${oddDir==='heavier'?'更重':'更轻'}。`;
+  } else {
+    res.textContent = '— 等待提交 —';
+  }
+}
+
+function submitGuess(){
+  if(weighCount<maxWeigh || selectedGuess==null || guessDir==null || gameOver) return;
+  gameOver=true;
+  updateUI(); draw();
+}
+
+// canvas rendering
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // background field
+  ctx.fillStyle='#f8fbff'; ctx.fillRect(0,0,W,H);
+
+  // draw 12 balls in two rows left area
+  const margin = 20; const cols=6; const gap = (W-2*margin-60)/ (cols-1);
+  for(let i=0;i<N;i++){
+    const row = Math.floor(i/6), col = i%6;
+    const x = margin + 30 + col*gap; const y = 80 + row*130;
+    // ball body
+    ctx.beginPath(); ctx.arc(x,y,22,0,Math.PI*2);
+    const hue = 210 + (i*25)%120; ctx.fillStyle = `hsl(${hue}deg 70% 60%)`;
+    ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#d7e6ff'; ctx.stroke();
+    // id label
+    ctx.fillStyle='#12232b'; ctx.font='bold 14px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(i+1), x, y);
+    // small indicator
+    if(balls[i].place==='left'){
+      ctx.fillStyle='rgba(255,200,120,0.95)'; ctx.fillRect(x-18,y+26,36,14);
+      ctx.fillStyle='#000'; ctx.fillText('L', x, y+33);
+    } else if(balls[i].place==='right'){
+      ctx.fillStyle='rgba(160,210,255,0.95)'; ctx.fillRect(x-18,y+26,36,14);
+      ctx.fillStyle='#000'; ctx.fillText('R', x, y+33);
+    }
+    // clickable region store
+    balls[i]._x = x; balls[i]._y = y; balls[i]._r = 22;
+  }
+
+  // draw balance (right area) — 向下移动以避免与球重叠
+  const cx = W-220, cy = 360;
+  ctx.fillStyle='#73818a'; ctx.fillRect(cx-6, cy-60, 12, 120);
+  // beam rotation
+  let angle = 0;
+  // 修正角度符号：当 left 为 heavier（左边下沉）时，angle 必须为正值，使左侧 y 增大（向下）
+  if(lastBalance==='left') angle = 12 * Math.PI/180;
+  else if(lastBalance==='right') angle = -12 * Math.PI/180;
+  const beamLen = 260;
+  const lx = cx - Math.cos(angle)*beamLen/2, ly = cy + Math.sin(angle)*beamLen/2;
+  const rx = cx + Math.cos(angle)*beamLen/2, ry = cy - Math.sin(angle)*beamLen/2;
+  ctx.strokeStyle='#333'; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(rx,ry); ctx.stroke();
+  // pans
+  const panW=120, panH=14;
+  const leftPanX = lx - panW/2, leftPanY = ly + 70;
+  const rightPanX = rx - panW/2, rightPanY = ry + 70;
+  ctx.fillStyle='#eef5ff'; ctx.fillRect(leftPanX,leftPanY,panW,panH); ctx.fillRect(rightPanX,rightPanY,panW,panH);
+  ctx.strokeStyle='#bfcfe8'; ctx.strokeRect(leftPanX,leftPanY,panW,panH); ctx.strokeRect(rightPanX,rightPanY,panW,panH);
+
+  // draw balls on pans
+  let lcount=0, rcount=0;
+  for(let i=0;i<N;i++){
+    if(balls[i].place==='left'){
+      const bx = leftPanX + 10 + (lcount%6)*18; const by = leftPanY - 12 - Math.floor(lcount/6)*18;
+      ctx.beginPath(); ctx.arc(bx,by,8,0,Math.PI*2); ctx.fillStyle = `hsl(${210+(i*25)%120}deg 70% 60%)`; ctx.fill(); ctx.stroke(); lcount++;
+    }
+    if(balls[i].place==='right'){
+      const bx = rightPanX + 10 + (rcount%6)*18; const by = rightPanY - 12 - Math.floor(rcount/6)*18;
+      ctx.beginPath(); ctx.arc(bx,by,8,0,Math.PI*2); ctx.fillStyle = `hsl(${210+(i*25)%120}deg 70% 60%)`; ctx.fill(); ctx.stroke(); rcount++;
+    }
+  }
+
+  // controls preview
+  ctx.fillStyle='#fff'; ctx.fillRect(W-360, 360, 320, 120); ctx.strokeStyle='#e2e8f0'; ctx.strokeRect(W-360,360,320,120);
+  ctx.fillStyle='#222'; ctx.font='600 14px system-ui'; ctx.fillText('Controls: 称重 / 清空 / 新局', W-200, 380);
+
+  // if game over, highlight odd ball and show message
+  if(gameOver){
+    // overlay reveal
+    ctx.fillStyle='rgba(0,0,0,0.04)'; ctx.fillRect(0,0,W,H);
+    // highlight actual odd
+    const b = balls[oddIndex]; ctx.beginPath(); ctx.arc(b._x,b._y,b._r+6,0,Math.PI*2); ctx.fillStyle = oddDir==='heavier'? 'rgba(240,200,70,0.18)' : 'rgba(150,200,255,0.18)'; ctx.fill();
+  }
+}
+
+// mouse handling
+canvas.addEventListener('click', (ev)=>{
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width, scaleY = H / rect.height;
+  const mx = (ev.clientX - rect.left) * scaleX, my = (ev.clientY - rect.top) * scaleY;
+  // click balls
+  for(let i=0;i<N;i++){
+    const b = balls[i]; const dx = mx - b._x, dy = my - b._y;
+    if(dx*dx+dy*dy <= b._r*b._r){ cyclePlace(i); return; }
+  }
+});
+
+// UI bindings
+document.getElementById('weighBtn').onclick = ()=>{ doWeigh(); };
+document.getElementById('clearBtn').onclick = ()=>{ clearPans(); };
+document.getElementById('shuffleBtn').onclick = ()=>{ randInit(); };
+document.getElementById('heavier').onclick = ()=>{ if(weighCount<maxWeigh || gameOver) return; guessDir = 'heavier'; updateUI(); };
+document.getElementById('lighter').onclick = ()=>{ if(weighCount<maxWeigh || gameOver) return; guessDir = 'lighter'; updateUI(); };
+document.getElementById('submitGuess').onclick = ()=>{ submitGuess(); };
+
+// keyboard shortcuts for fun
+window.addEventListener('keydown', (e)=>{
+  if(e.key==='r') randInit(); if(e.key==='c') clearPans(); if(e.key==='w') doWeigh();
+});
+
+// initialize and auto-fit canvas
+function fit(){ const area = document.getElementById('playArea'); const rect = area.getBoundingClientRect(); // we already use CSS to scale canvas
+}
+window.addEventListener('resize', ()=>{ fit(); draw(); });
+
+randInit(); updateUI(); draw();
+</script>
+</body>
+</html>
